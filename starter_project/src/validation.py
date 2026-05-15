@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import time
 from pathlib import Path
 from urllib import request
 
@@ -55,12 +56,13 @@ def build_summary(rows: list[dict[str, str]]) -> dict[str, int | str]:
 def write_summary(summary: dict[str, int | str], output_path: str | Path) -> Path:
     output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
-    output_file.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    output_file.write_text(f"{json.dumps(summary, indent=2)}\n", encoding="utf-8")
     return output_file
 
 
 def send_discord_message(summary: dict[str, int | str], webhook_url: str = DISCORD_WEBHOOK_URL) -> None:
     if not webhook_url:
+        print("[Discord] No webhook URL configured, skipping alert.")
         return
 
     message = (
@@ -74,12 +76,31 @@ def send_discord_message(summary: dict[str, int | str], webhook_url: str = DISCO
     http_request = request.Request(
         webhook_url,
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "DataQualityPipeline/1.0",
+        },
         method="POST",
     )
-    with request.urlopen(http_request, timeout=15) as response:
-        if response.status >= 400:
-            raise RuntimeError(f"Discord webhook failed with status {response.status}")
+
+    max_retries = 3
+    last_err: Exception | None = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            with request.urlopen(http_request, timeout=15) as response:
+                if response.status >= 400:
+                    raise RuntimeError(f"Discord webhook returned HTTP {response.status}")
+            print(f"[Discord] Alert sent successfully: {summary['validation_status'].upper()}")
+            return
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+            if attempt < max_retries:
+                wait = 2 ** (attempt - 1)
+                print(f"[Discord] Attempt {attempt} failed ({exc}), retrying in {wait}s...")
+                time.sleep(wait)
+
+    print(f"[Discord] WARNING: Failed to send alert after {max_retries} attempts: {last_err}")
+    print("[Discord] Pipeline will continue without Discord notification.")
 
 
 def run_lab_check(

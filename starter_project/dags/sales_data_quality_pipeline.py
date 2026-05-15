@@ -25,7 +25,15 @@ def validate_orders_task() -> dict:
     5. Send the Discord alert.
     6. Raise an error on failed validation.
     """
-    raise NotImplementedError
+    from src.config import AIRFLOW_INPUT_FILE, SUMMARY_FILE
+    from src.validation import run_lab_check
+
+    return run_lab_check(
+        input_path=AIRFLOW_INPUT_FILE,
+        output_path=SUMMARY_FILE,
+        allow_failure=False,
+        skip_discord=False,
+    )
 
 
 if DAG is not None:
